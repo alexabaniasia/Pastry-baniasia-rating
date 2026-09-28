@@ -1,0 +1,364 @@
+@page "/reviews"
+@rendermode InteractiveServer
+@using System.Globalization
+@using System.ComponentModel.DataAnnotations
+@using MaisonFleurie.Services
+@inject AuthService Auth
+
+<PageTitle>Reviews — Maison Fleurie</PageTitle>
+
+<!-- Hero -->
+<section class="menu-hero">
+    <div class="container menu-hero-inner">
+        <p class="eyebrow">The Guest Book</p>
+        <h1>Rate Your <span class="accent-italic">Sweet Moment</span></h1>
+        <p class="hero-text">
+            Tasted one of our creations? Leave a rating and a few words for our
+            atelier &mdash; every note is read by the whole team.
+        </p>
+        <a class="btn btn-dark" href="#write-review">Write a Review</a>
+    </div>
+</section>
+
+<!-- Summary + Form -->
+<section class="section">
+    <div class="container contact-grid">
+
+        <!-- Rating summary -->
+        <div class="contact-info">
+            <p class="eyebrow">Patron Ratings</p>
+            <h2>What Paris Is Tasting</h2>
+
+            @if (Total == 0)
+            {
+                <p>No reviews yet &mdash; be the first to share your thoughts.</p>
+            }
+            else
+            {
+                <div class="rv-summary">
+                    <div class="rv-average">
+                        <span class="rv-average-number">@Average.ToString("0.0", CultureInfo.InvariantCulture)</span>
+                        @Stars(Average, 20)
+                        <span class="rv-average-count">@Total @(Total == 1 ? "review" : "reviews")</span>
+                    </div>
+
+                    <ul class="rv-bars">
+                        @for (var star = 5; star >= 1; star--)
+                        {
+                            var s = star;
+                            var count = CountFor(s);
+                            var pct = (count * 100.0 / Total).ToString("0.##", CultureInfo.InvariantCulture);
+                            <li>
+                                <span class="rv-bar-label">@s ★</span>
+                                <span class="rv-bar-track"><span class="rv-bar-fill" style="width:@(pct)%"></span></span>
+                                <span class="rv-bar-count">@count</span>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        </div>
+
+        <!-- Review form -->
+        <div class="contact-form-card rv-form" id="write-review">
+            <h3>Leave a Review</h3>
+            <p class="form-subtext">Choose a rating, then tell us what you loved (or what we could do better).</p>
+
+            @if (submitted)
+            {
+                <div class="form-success">
+                    <p><strong>Merci, @(FirstName(lastSubmittedName))!</strong></p>
+                    <p>Your review has been added to the guest book below.</p>
+                    <button class="btn btn-outline btn-sm" type="button" @onclick="ResetForm">Write another review</button>
+                </div>
+            }
+            else
+            {
+                <EditForm Model="@model" OnValidSubmit="@HandleSubmit">
+                    <DataAnnotationsValidator />
+
+                    <div class="form-row">
+                        <div class="form-field">
+                            <label for="rv-name">Your Name</label>
+                            <InputText id="rv-name" @bind-Value="model.Name" placeholder="Anna Martin" />
+                            <ValidationMessage For="() => model.Name" />
+                        </div>
+                        <div class="form-field">
+                            <label for="rv-item">Your Creation</label>
+                            <InputSelect id="rv-item" @bind-Value="model.Item">
+                                <option value="">Select a pastry</option>
+                                @foreach (var item in items)
+                                {
+                                    <option value="@item">@item</option>
+                                }
+                            </InputSelect>
+                            <ValidationMessage For="() => model.Item" />
+                        </div>
+                    </div>
+
+                    <div class="form-field">
+                        <label id="rv-rating-label">Your Rating</label>
+                        <div class="rv-star-input" role="radiogroup" aria-labelledby="rv-rating-label">
+                            @for (var i = 1; i <= 5; i++)
+                            {
+                                var value = i;
+                                <button type="button"
+                                        role="radio"
+                                        aria-checked="@(model.Rating == value ? "true" : "false")"
+                                        aria-label="@value out of 5"
+                                        class="@(value <= model.Rating ? "rv-star-btn rv-star-on" : "rv-star-btn")"
+                                        @onclick="() => SetRating(value)">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="@StarPath" /></svg>
+                                </button>
+                            }
+                            <span class="rv-rating-word">@RatingWord(model.Rating)</span>
+                        </div>
+                        <ValidationMessage For="() => model.Rating" />
+                    </div>
+
+                    <div class="form-field">
+                        <label for="rv-comment">Your Comment</label>
+                        <InputTextArea id="rv-comment" rows="4" @bind-Value="model.Comment" @bind-Value:event="oninput"
+                                       placeholder="The texture, the flavours, the service..." />
+                        <div class="rv-counter">@model.Comment.Length / @MaxComment</div>
+                        <ValidationMessage For="() => model.Comment" />
+                    </div>
+
+                    <button type="submit" class="btn btn-dark btn-block">Submit Review</button>
+                </EditForm>
+            }
+        </div>
+    </div>
+</section>
+
+<!-- Reviews list -->
+<section class="section section-tinted">
+    <div class="container">
+        <div class="section-heading">
+            <p class="eyebrow">The Experience</p>
+            <h2>Kind Words from Our Patrons</h2>
+            <p class="section-subtext">Filter by rating to see what guests are saying.</p>
+            <div class="category-pills">
+                <button type="button" class="@(filter == 0 ? "pill pill-active" : "pill")" @onclick="() => SetFilter(0)">All</button>
+                @for (var f = 5; f >= 1; f--)
+                {
+                    var star = f;
+                    <button type="button" class="@(filter == star ? "pill pill-active" : "pill")" @onclick="() => SetFilter(star)">@star ★</button>
+                }
+            </div>
+        </div>
+
+        @if (Visible.Count == 0)
+        {
+            <p class="rv-empty">No reviews match this rating yet.</p>
+        }
+        else
+        {
+            <div class="testimonial-grid rv-grid">
+                @foreach (var r in Visible)
+                {
+                    <article class="testimonial-card rv-card">
+                        <div class="rv-card-top">
+                            @Stars(r.Rating, 16)
+                            <span class="rv-date">@r.CreatedAt.ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
+                        </div>
+                        <p>&ldquo;@r.Comment&rdquo;</p>
+                        <cite>— @r.Name</cite>
+                        <span class="rv-tag">@r.Item</span>
+                    </article>
+                }
+            </div>
+        }
+    </div>
+</section>
+
+<style>
+    /* Scoped to the Reviews page — uses the site's existing colour tokens */
+    .rv-summary { margin-top: 24px; display: flex; flex-direction: column; gap: 28px; }
+    .rv-average { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
+    .rv-average-number { font-family: var(--font-display, "Playfair Display", Georgia, serif); font-size: 56px; line-height: 1; color: var(--color-berry, #5e2a45); }
+    .rv-average-count { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-berry-soft, #8f5a75); }
+
+    .rv-stars { position: relative; display: inline-flex; vertical-align: middle; }
+    .rv-stars-layer { display: inline-flex; gap: 2px; }
+    .rv-stars-base { color: var(--color-petal, #ffd9e8); }
+    .rv-stars-fill { position: absolute; top: 0; left: 0; overflow: hidden; white-space: nowrap; color: var(--color-sweet, #e8478b); }
+    .rv-stars-fill .rv-stars-layer { width: max-content; }
+
+    .rv-bars { display: flex; flex-direction: column; gap: 10px; }
+    .rv-bars li { display: grid; grid-template-columns: 36px 1fr 28px; align-items: center; gap: 12px; font-size: 13px; color: var(--color-berry, #5e2a45); }
+    .rv-bar-track { height: 8px; border-radius: 999px; background: var(--color-petal, #ffd9e8); overflow: hidden; display: block; }
+    .rv-bar-fill { display: block; height: 100%; border-radius: 999px; background: var(--color-sweet, #e8478b); transition: width 0.3s ease; }
+    .rv-bar-count { text-align: right; color: var(--color-berry-soft, #8f5a75); }
+
+    .rv-star-input { display: flex; align-items: center; gap: 4px; }
+    .rv-star-btn { background: none; border: none; padding: 2px; line-height: 0; color: var(--color-petal, #ffd9e8); transition: color 0.15s ease, transform 0.15s ease; }
+    .rv-star-btn:hover { transform: scale(1.15); color: var(--color-bubblegum, #ff8fb8); }
+    .rv-star-btn.rv-star-on { color: var(--color-sweet, #e8478b); }
+    .rv-star-btn:focus-visible { outline: 2px solid var(--color-bubblegum, #ff8fb8); outline-offset: 2px; border-radius: 6px; }
+    .rv-rating-word { margin-left: 12px; font-family: var(--font-display, "Playfair Display", Georgia, serif); font-style: italic; color: var(--color-sweet, #e8478b); }
+
+    .rv-form .validation-message { margin: 6px 0 0; }
+    .rv-counter { text-align: right; font-size: 11px; margin-top: 6px; color: var(--color-berry-soft, #8f5a75); }
+
+    .rv-grid .rv-card { display: flex; flex-direction: column; }
+    .rv-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .rv-date { font-size: 12px; letter-spacing: 0.04em; color: var(--color-berry-soft, #8f5a75); }
+    .rv-tag { align-self: flex-start; margin-top: 14px; padding: 5px 14px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; background: var(--color-blush, #fff0f6); color: var(--color-sweet-dark, #cf3376); border: 1px solid var(--color-petal, #ffd9e8); }
+    .rv-empty { text-align: center; }
+
+    @@media (max-width: 720px) {
+        .rv-average-number { font-size: 44px; }
+        .rv-star-btn svg { width: 28px; height: 28px; }
+    }
+</style>
+
+@code {
+    private const int MaxComment = 600;
+    private const string StarPath = "M12 2.5l2.94 6.06 6.56.9-4.8 4.62 1.2 6.52L12 17.4l-5.9 3.2 1.2-6.52L2.5 9.46l6.56-.9L12 2.5z";
+
+    private readonly string[] items =
+    {
+        "L'Opaline Fleurie", "L'Essence d'Or", "Matcha & Fleur d'Oranger",
+        "La Tarte aux Figues", "Tarte Citron Sauvage", "L'Éclat Chocolat-Caramel",
+        "Croissant Pur Beurre", "Pain au Chocolat", "Kouign-Amann",
+        "Macarons", "The Boutique Experience"
+    };
+
+    // In-memory guest book shared by all visitors while the app is running.
+    // (Resets on restart — swap for a database table when you want persistence.)
+    private static readonly object storeLock = new();
+    private static readonly List<Review> store = new()
+    {
+        new() { Name = "Isabelle L.", Item = "L'Opaline Fleurie", Rating = 5, CreatedAt = DateTime.Now.AddDays(-2),
+                Comment = "The rose cream is impossibly light. I came for one and left with a box of six." },
+        new() { Name = "Marc Antoine D.", Item = "Kouign-Amann", Rating = 5, CreatedAt = DateTime.Now.AddDays(-5),
+                Comment = "Caramelised edges, buttery layers, perfectly balanced. Easily the best in the 11th." },
+        new() { Name = "Camille R.", Item = "Tarte Citron Sauvage", Rating = 4, CreatedAt = DateTime.Now.AddDays(-9),
+                Comment = "Beautifully tart and the meringue is divine. I would love a slightly thicker base." },
+        new() { Name = "Julien P.", Item = "Croissant Pur Beurre", Rating = 4, CreatedAt = DateTime.Now.AddDays(-14),
+                Comment = "Crisp outside, honeycomb inside. Arrive early because they sell out fast." },
+        new() { Name = "Sofia M.", Item = "The Boutique Experience", Rating = 5, CreatedAt = DateTime.Now.AddDays(-20),
+                Comment = "Warm welcome, gorgeous shop and thoughtful packaging for our anniversary order." },
+        new() { Name = "Thomas B.", Item = "Macarons", Rating = 3, CreatedAt = DateTime.Now.AddDays(-27),
+                Comment = "Lovely pistachio flavour, though the shells were a touch soft on the day I visited." },
+    };
+
+    private ReviewModel model = new();
+    private bool submitted;
+    private string lastSubmittedName = "";
+    private int filter; // 0 = all, 1..5 = only that rating
+
+    private List<Review> All
+    {
+        get { lock (storeLock) { return store.OrderByDescending(r => r.CreatedAt).ToList(); } }
+    }
+
+    private List<Review> Visible => filter == 0 ? All : All.Where(r => r.Rating == filter).ToList();
+    private int Total => All.Count;
+    private double Average => Total == 0 ? 0 : All.Average(r => r.Rating);
+    private int CountFor(int star) => All.Count(r => r.Rating == star);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // Pre-fill the name when the visitor is logged in
+        await Auth.LoadAsync();
+        if (Auth.CurrentUser is { } user && string.IsNullOrWhiteSpace(model.Name))
+        {
+            model.Name = user.FullName;
+            StateHasChanged();
+        }
+    }
+
+    private void SetRating(int value) => model.Rating = value;
+
+    private void SetFilter(int value) => filter = value;
+
+    private void HandleSubmit()
+    {
+        var review = new Review
+        {
+            Name = model.Name.Trim(),
+            Item = model.Item,
+            Rating = model.Rating,
+            Comment = model.Comment.Trim(),
+            CreatedAt = DateTime.Now
+        };
+
+        lock (storeLock) { store.Add(review); }
+
+        lastSubmittedName = review.Name;
+        filter = 0;
+        submitted = true;
+    }
+
+    private void ResetForm()
+    {
+        var keepName = model.Name;
+        model = new ReviewModel { Name = keepName };
+        submitted = false;
+    }
+
+    private static string FirstName(string name)
+        => string.IsNullOrWhiteSpace(name) ? "friend" : name.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+
+    private static string RatingWord(int rating) => rating switch
+    {
+        1 => "Disappointing",
+        2 => "Could be better",
+        3 => "Good",
+        4 => "Delicious",
+        5 => "Exquisite",
+        _ => "Tap a star"
+    };
+
+    // Renders 5 stars; the pink layer is clipped to the rating so averages like 4.6 show partially filled.
+    private RenderFragment Stars(double value, int size) => __builder =>
+    {
+        var pct = (Math.Clamp(value, 0, 5) / 5.0 * 100).ToString("0.##", CultureInfo.InvariantCulture);
+        <span class="rv-stars" role="img" aria-label="@(value.ToString("0.#", CultureInfo.InvariantCulture)) out of 5 stars">
+            <span class="rv-stars-layer rv-stars-base" aria-hidden="true">
+                @for (var i = 0; i < 5; i++)
+                {
+                    <svg width="@size" height="@size" viewBox="0 0 24 24" fill="currentColor"><path d="@StarPath" /></svg>
+                }
+            </span>
+            <span class="rv-stars-fill" style="width:@(pct)%" aria-hidden="true">
+                <span class="rv-stars-layer">
+                    @for (var i = 0; i < 5; i++)
+                    {
+                        <svg width="@size" height="@size" viewBox="0 0 24 24" fill="currentColor"><path d="@StarPath" /></svg>
+                    }
+                </span>
+            </span>
+        </span>
+    };
+
+    public class Review
+    {
+        public string Name { get; set; } = "";
+        public string Item { get; set; } = "";
+        public int Rating { get; set; }
+        public string Comment { get; set; } = "";
+        public DateTime CreatedAt { get; set; }
+    }
+
+    public class ReviewModel
+    {
+        [Required(ErrorMessage = "Please enter your name.")]
+        [StringLength(60, ErrorMessage = "Name is too long.")]
+        public string Name { get; set; } = "";
+
+        [Required(ErrorMessage = "Please choose a creation.")]
+        public string Item { get; set; } = "";
+
+        [Range(1, 5, ErrorMessage = "Please select a star rating.")]
+        public int Rating { get; set; }
+
+        [Required(ErrorMessage = "Please write a short comment.")]
+        [StringLength(MaxComment, MinimumLength = 10, ErrorMessage = "Comments must be between 10 and 600 characters.")]
+        public string Comment { get; set; } = "";
+    }
+}
